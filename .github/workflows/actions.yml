@@ -1,0 +1,62 @@
+name: static-container-registry
+
+on:
+  push:
+    branches: [ $default-branch ]
+  pull_request:
+    branches: [ $default-branch ]
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v2
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        pip install flake8 pylint
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    - name: Analysing the code with pylint
+      run: |
+        pylint `ls -R|grep .py$|xargs`
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: |
+        OS=xUbuntu_20.04
+        CRIO_VERSION=1.22
+        echo "deb https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$OS/ /" \
+            | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+        echo "deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$CRIO_VERSION/$OS/ /" \
+            | sudo tee /etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION.list
+        curl -L https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$CRIO_VERSION/$OS/Release.key \
+            | sudo apt-key add -
+        sudo apt update
+        sudo apt -y install hardlink skopeo cri-o cri-o-runc
+
+        ORAS_VERSION=0.12.0
+        curl -#LO https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz
+        sudo tar -zxf oras_${ORAS_VERSION}_*.tar.gz -C /usr/local/bin/ oras
+        rm oras_${ORAS_VERSION}_*.tar.gz
+
+        bash <(curl -s https://raw.githubusercontent.com/pgrange/bash_unit/master/install.sh)
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag static-registry-container:${GITHUB_SHA}
+      # TODO: upload...
+    - name: Unit testing with bash_unit
+      run: |
+        CUT=$(docker run --rm -d static-registry-container:${GITHUB_SHA})
+        trap "docker rm -rf $CUT" EXIT
+        FORCE_COLOR=true ./bash_unit test.sh
+      # TODO: parse result (in TAP format)
