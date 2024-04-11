@@ -74,6 +74,10 @@ jobs:
 
         # Start cri-o service
         sudo systemctl start crio
+
+        # Fix broken containerd setup
+        sudo containerd config default | sudo tee /etc/containerd/config.toml
+        sudo systemctl restart containerd
       # TODO: cache the installed image?
 
     - name: Downgrade Oras to 0.12.0
